@@ -11,7 +11,7 @@ from sklearn.linear_model import LogisticRegression     #baseline classifier
 from sklearn.metrics import (
     confusion_matrix,               #confusion matrix
     classification_report,          #precision/recall
-    average_precision_score,        #PR-AUC
+    average_precision_score,        #PR-AUC (Precision: When the model says risky, how often is it correct?, recall: Out of all truly risky cases, how many did it catch?)
     precision_recall_curve,         #threshold tuning     *FLAG ALL*
 )
 
@@ -49,5 +49,27 @@ def main():
     )
 
     model.fit(x_train, y_train)             #Model learns patterns from training data
+
+    proba = model.predict_proba(x_test)[:,1]        #predict_proba: returns 2 probabilities per sample (risky, not-risky)
+    pred = (proba >= 0.5).astype(int)               #[:,1]: selects predicted risky points
+                                                    #risky if probability >=0.5
+
+
+    #----------------------------------------------
+    #Evaluation
+    #----------------------------------------------
+    print("PR-AUC:", average_precision_score(y_test, proba))            #higher(>0.01(risky rate)) PR-AUC means model is learning
+    print("Confusion matrix:\n", confusion_matrix(y_test, pred))        #Helps to find false negative
+    print(classification_report(y_test, pred, digits=4))                #compares truth vs prediction and prints metrics in 4 decimal places
+
+    #--------------------------------------------
+    #Threshold tuning
+    #--------------------------------------------
+
+    target_recall = 0.08
+    precision, recall, thresholds = precision_recall_curve(y_test, proba)       #computes precision and recall for many thresholds
+    idx = np.where(recall >= target_recall)[0]                                  #Finds thresholds with at least 80% recalls
+    i = idx[-1]
+    thr = thresholds[i-1] if i > 0 else 0.0                                     #choose largest threshold that still meets recall target, large threshold = fewer false alarms, then evaluate
 
     
