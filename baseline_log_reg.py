@@ -2,11 +2,12 @@ import numpy as np              #Handles arrays and math
 import pandas as pd             #reads data and manipulates table
 import matplotlib.pyplot as plt
 from sklearn.inspection import permutation_importance
-
-
+from imblearn.pipeline import Pipeline
+from imblearn.over_sampling import SMOTE
+from sklearn.feature_selection import VarianceThreshold
 from sklearn.model_selection import train_test_split    #splits data into training and test sets
 
-from sklearn.pipeline import Pipeline                   #chains steps together in order
+
 from sklearn.impute import SimpleImputer                #fills missing values
 from sklearn.preprocessing import StandardScaler        #scales data for the model
 from sklearn.linear_model import LogisticRegression     #baseline classifier
@@ -16,17 +17,22 @@ from sklearn.metrics import (
     classification_report,          #precision/recall
     average_precision_score,        #PR-AUC (Precision: When the model says risky, how often is it correct?, recall: Out of all truly risky cases, how many did it catch?)
     precision_recall_curve,         #threshold tuning     *FLAG ALL*
+    f1_score,
+    recall_score,
 )
+
+from xgboost import XGBClassifier 
 
 DATA = "IEEE68bus_ML_ready_risky.csv.gz"        #compressed dataset file name
 RANDOM_STATE = 42                               #makes split reproducible *FLAG*
 
+
 #------------------------------------
 # Confusion matrix plot function
 #------------------------------------
-def plot_confusion(cm, title, filename):
-    fig, ax = plt.subplots()
-    im = ax.imshow(cm)
+def plot_confusion(cm, title, filename):                
+    fig, ax = plt.subplots()                        #creates matplotlib figure with axis
+    im = ax.imshow(cm)                              #displays as colored image
 
     ax.set_title(title)
     ax.set_xlabel("Predicted")
@@ -36,18 +42,18 @@ def plot_confusion(cm, title, filename):
     ax.set_xticklabels(["not_risky", "risky"])
     ax.set_yticklabels(["not_risky", "risky"])
 
-    for (i, j), v in np.ndenumerate(cm):
-        ax.text(j, i, str(v), ha="center", va="center")
+    for (i, j), v in np.ndenumerate(cm):                    #writes count into cell
+        ax.text(j, i, str(v), ha="center", va="center")     #vertical and horizontal alignment 
 
-    fig.colorbar(im, ax=ax)
-    plt.savefig(filename, dpi=300, bbox_inches="tight")
-    plt.show()
+    fig.colorbar(im, ax=ax)                                 #color scale bar
+    plt.savefig(filename, dpi=300, bbox_inches="tight")     #saves figure
+    plt.show()                                              #displays
 
 #------------------------------------
 # Precision-recall plot function
 #------------------------------------
 
-def plot_pr_curve(y_true, proba, filename, thr_default=0.5, thr_tuned=None):
+def plot_pr_curve(y_true, proba, filename, thr_default=0.5, thr_tuned=None):        
     precision, recall, thresholds = precision_recall_curve(y_true, proba)
     ap = average_precision_score(y_true, proba)
 
@@ -87,22 +93,25 @@ def main():
     print("Rate of risk:", float(y.mean()), flush=True)                 #How imbalanced the data is
 
     #----------------------------------------------
-    #80% train, 20% test.
+    #80% train, 30% test.
     #----------------------------------------------
     x_train, x_test, y_train, y_test = train_test_split(
-        x, y, test_size=0.2, random_state=RANDOM_STATE, stratify=y     #stratify makes a split so that the proportion... 
+        x, y, test_size=0.3, random_state=RANDOM_STATE, stratify=y     #stratify makes a split so that the proportion... 
                                                                        #...of values in the sample produced is the same as...
                                                                        #...the proportion of values provided by parameters 
                                                                        #...maintain 1% risk
+    
+
     )
     
     #----------------------------------------------
     #Baseline model pipeline
     #----------------------------------------------
     model = Pipeline(steps=[
-        ("imputer", SimpleImputer(strategy="median")),                                      #
+        ("imputer", SimpleImputer(strategy="median")),                                      
+        ("smote", SMOTE(random_state=42)),   # balance minority class
         ("scaler", StandardScaler(with_mean=False)),                                        #scales features to be on similar numeric ranges, with_mean=False: avoids issue with dense metrics
-        ("classifier", LogisticRegression(max_iter=3000, class_weight="balanced" ))         #predicts probability of risk, class_weight="balanced": gives risk cases more importance during training due to rareness 
+        ("classifier", LogisticRegression(max_iter=3000,))         #predicts probability of risk, class_weight="balanced": gives risk cases more importance during training due to rareness 
     ]                                                                                       #...otherwise model might ignore risk cases   *FLAG*
     )
 
@@ -124,37 +133,45 @@ def main():
     #Threshold tuning
     #--------------------------------------------
 
-    target_recall = 0.80
+    target_recall = 0.90
     precision, recall, thresholds = precision_recall_curve(y_test, proba)       #computes precision and recall for many thresholds
-    idx = np.where(recall >= target_recall)[0]                                  #Finds thresholds with at least 80% recalls
 
-    if len(idx) == 0:
-        print(f"\nNo threshold achieves recall >= {target_recall:.2f}")
-        return
+    best_thr = None
+    best_f1 = -1.0
 
-    i = idx[-1]                                                                 #Last index in the list
-    thr = thresholds[i-1] if i > 0 else 0.0                                     #choose largest threshold that still meets recall target, large threshold = fewer false alarms, then evaluate
+    for th in thresholds: 
+        pred_temp = (proba >= th).astype(int)
+        r = recall_score(y_test, pred_temp, zero_division=0)
+        f1 = f1_score(y_test, pred_temp, zero_division=0)
 
-    pred_thr = (proba >= thr).astype(int)                                       #replaces default threshold with tuned threshold
+        if r >= target_recall and f1 > best_f1:
+            best_f1 = f1
+            best_thr = th
+
+    if best_thr is None:
+        print(f"\nNo threshold found with recall >= {target_recall:.2f}")
+        best_thr = 0.5
+
+    pred_thr = (proba >= best_thr).astype(int)                                       #replaces default threshold with tuned threshold
 
     #------------------------------------------------
     #Printing threshold labels
     #------------------------------------------------
     print(f"\n--- Threshold tuned evaluation (target recall {target_recall:.2f}) ---")
-    print("Chosen threshold:", thr)
+    print("Chosen threshold:", best_thr)
     print("Confusion matrix:\n", confusion_matrix(y_test, pred_thr))
     print(classification_report(y_test, pred_thr, digits=4))
 
     #----------------------------------------
     #VISUALIZATION 
     #----------------------------------------
-    cm_default = confusion_matrix(y_test, pred)
-    cm_tuned = confusion_matrix(y_test, pred_thr)
+    cm_default = confusion_matrix(y_test, pred)             #prediction using default threshold
+    cm_tuned = confusion_matrix(y_test, pred_thr)           #prediction using tuned threshold
 
     plot_confusion(cm_default, "Confusion Matrix (threshold = 0.5)", "fig_confusion_05.png")
-    plot_confusion(cm_tuned, f"Confusion Matrix (threshold = {thr:.3f})", "fig_confusion_tuned.png")
+    plot_confusion(cm_tuned, f"Confusion Matrix (threshold = {best_thr:.3f})", "fig_confusion_tuned.png")
 
-    plot_pr_curve(y_test, proba, "fig_pr_curve.png", thr_default=0.5, thr_tuned=thr)
+    plot_pr_curve(y_test, proba, "fig_pr_curve.png", thr_default=0.5, thr_tuned=best_thr)
 
     #Predicted Probability Distribution
     plt.figure()
