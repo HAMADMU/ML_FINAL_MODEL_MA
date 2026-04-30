@@ -6,3 +6,6 @@ __pycache__/
 .venv/*.xlsx
 *.csv.gz
 *.txt
+*.xlsx
+*.csv.gz
+*.txt
