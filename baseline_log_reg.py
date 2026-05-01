@@ -4,7 +4,6 @@ import matplotlib.pyplot as plt
 from sklearn.inspection import permutation_importance
 from imblearn.pipeline import Pipeline
 from imblearn.over_sampling import SMOTE
-from sklearn.feature_selection import VarianceThreshold
 from sklearn.model_selection import train_test_split    #splits data into training and test sets
 
 
@@ -21,7 +20,6 @@ from sklearn.metrics import (
     recall_score,
 )
 
-from xgboost import XGBClassifier 
 
 DATA = "IEEE68bus_ML_ready_risky.csv.gz"        #compressed dataset file name
 RANDOM_STATE = 42                               #makes split reproducible *FLAG*
