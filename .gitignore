@@ -1,11 +1,4 @@
-*.csv
-*.csv.gz
-*.xlsx
-*.txt
+.venv/
 __pycache__/
-.venv/*.xlsx
-*.csv.gz
-*.txt
-*.xlsx
-*.csv.gz
-*.txt
+*.pyc
+*.gz
